@@ -1,0 +1,77 @@
+pipeline {
+    agent any
+    tools {
+        go '1.18'
+    }
+    environment {
+        G0111MODULE = 'auto'
+        CGO_ENABLED = 0
+        GOPATH = "${JENKINS_HOME}/jobs/${JOB_NAME}/builds/${BUILD_ID}"
+        GOCACHE = "${WORKSPACE}"
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                script {
+                git url: 'https://github.com/KristinaKulabuhova/isp-clouds-test.git'
+                sh "ls -lart ./*"
+                }
+            }
+        }
+                
+        stage('Pre Test') {
+            steps {
+                echo 'Installing dependencies' 
+                sh 'go version' 
+                sh 'go mod tidy'
+                sh 'go get -u golang.org/x/lint/golint'
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                echo 'Compiling and building' 
+                sh 'go build -o ./server'
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                withEnv(["PATH+GO=${GOPATH}/bin"]){
+                    echo 'Running test'
+                    sh 'go test -v ./...'
+                }
+            }
+            post {
+                always {
+                    script {
+                      allure([
+                        includeProperties: false,
+                        jdk: '',
+                        properties: [],
+                        reportBuildPolicy: 'ALWAYS',
+                        results: [[path: 'target/allure-results']]
+                      ])
+                    }    
+                }
+            }
+        }
+        stage('SonarQube analysis') {
+            steps {
+                script {
+                    def scannerHome = tool 'sonar';
+                    withSonarQubeEnv('sonarqube') { // If you have configured more than one global server connection, you can specify its name
+                      sh "${scannerHome}/bin/sonar-scanner"
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy') {
+            steps {
+                archiveArtifacts artifacts: 'server', fingerprint: true
+            }
+        }
+    }
+}
